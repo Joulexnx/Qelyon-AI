@@ -4,3 +4,11 @@ requests
 pillow
 google-genai
 PyMuPDF  # PDF analizi için zorunlu
+# =========================
+# requirements.txt
+# =========================
+streamlit>=1.39
+google-generativeai>=0.8.0
+openai>=1.51.0
+pillow>=10.3.0
+requests>=2.31.0
