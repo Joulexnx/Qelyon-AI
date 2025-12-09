@@ -34,7 +34,7 @@ def generate_image(prompt: str) -> bytes:
     result = client.images.generate(
         model="gpt-image-1",          # veya gpt-image-1-mini
         prompt=prompt,
-        size="1024x1024",             # kare ürün görseli için ideal
+        size="1080x1350",             # kare ürün görseli için ideal
         n=1,
         # output_format="png",        # gpt-image-1 için opsiyonel, varsayılan png :contentReference[oaicite:2]{index=2}
     )
@@ -1266,3 +1266,4 @@ def main_app_router():
 
 if __name__ == "__main__":
     main_app_router()
+
