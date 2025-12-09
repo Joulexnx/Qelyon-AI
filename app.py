@@ -1,26 +1,4 @@
 # =========================
-# requirements.txt
-# =========================
-streamlit>=1.39
-google-generativeai>=0.8.0
-openai>=1.51.0
-pillow>=10.3.0
-requests>=2.31.0
-
-# =========================
-# runtime.txt
-# =========================
-python-3.11
-
-# =========================
-# .streamlit/secrets.toml.example
-# =========================
-OPENAI_API_KEY = "sk-..."
-GEMINI_API_KEY = "AIza..."
-WEATHER_API_KEY = "your-openweathermap-key"
-OPENAI_MODEL = "gpt-4o"
-
-# =========================
 # app.py  (kök dizinde)
 # =========================
 from __future__ import annotations
@@ -880,3 +858,4 @@ def main_app_router():
 
 if __name__ == "__main__":
     main_app_router()
+
