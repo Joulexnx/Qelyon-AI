@@ -1,0 +1,6 @@
+streamlit
+openai
+requests
+pillow
+google-genai
+PyMuPDF  # PDF analizi için zorunlu
