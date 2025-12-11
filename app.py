@@ -18,6 +18,7 @@ import streamlit as st
 from PIL import Image, ImageOps, ImageFilter, ImageChops, ImageDraw
 from openai import OpenAI
 import mimetypes
+from tempfile import NamedTemporaryFile
 
 import base64
 from io import BytesIO
@@ -237,35 +238,75 @@ def get_dalle_regenerative_prompt(base_image_bytes: bytes, user_command: str) ->
 
 def optimized_dalle_edit(image_bytes: bytes, user_command: str) -> bytes | None:
     """
-    GPT-4o Vision ile analiz edilen ve yeniden oluşturulan prompt'u kullanarak DALL-E 3 ile edit yapar.
+    GPT-4o Vision ile analiz edilen ve yeniden oluşturulan prompt'u kullanarak
+    GPT Image 1 ile GERÇEK EDIT yapar (orijinal ürünü olabildiğince korur).
     """
-    # 1. GPT-4o'dan yeni prompt'u al (GÜNCELLENMİŞ VERSİYON KULLANILACAK)
+    if not client:
+        return None
+
+    # 1) Vision'dan base prompt'u al
     new_prompt = get_dalle_regenerative_prompt(image_bytes, user_command)
-    
     if not new_prompt:
         st.error("Görseli analiz edip yeni komut oluşturulamadı.")
         return None
-        
-    # 2. Yeni prompt ile DALL-E'yi çağır (Özel Konfigürasyonu KULLANILDI)
-    st.info(f"🎨 Yeni oluşturma komutu: {new_prompt[:120]}...")
-    
-    if not client: return None
+
+    # 2) Edit için daha güvenli, ürün odaklı final prompt
+    # (İngilizce tutmak, görsel modeller için daha stabil oluyor)
+    full_prompt = (
+        "Edit this product photo. Keep the original product exactly the same "
+        "(shape, size, logo, colors, camera angle). "
+        "Only apply the following change to the background or environment: "
+        f"{user_command}. "
+        "Do not add new products or remove existing ones.\n\n"
+        f"Base layout description:\n{new_prompt}"
+    )
+
+    st.info(f"🎨 Oluşturulan edit komutu: {full_prompt[:160]}...")
+
+    # 3) image_bytes → PNG → geçici dosya (images.edit dosya objesi bekliyor)
+    tmp_path: Optional[str] = None
     try:
-        result = client.images.generate(
-            model="gpt-image-1",  # Kullanıcının özel modeli
-            prompt=new_prompt,
-            size="1024x1024",
-            n=1,
-        )
+        # Bytes'tan resmi aç
+        img = Image.open(io.BytesIO(image_bytes))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        buf.seek(0)
+
+        # Geçici PNG dosyası oluştur
+        with NamedTemporaryFile(delete=False, suffix=".png") as tmp:
+            tmp.write(buf.getvalue())
+            tmp_path = tmp.name
+
+        # 4) GPT Image edit endpoint'i ile gerçek düzenleme
+        with open(tmp_path, "rb") as f:
+            result = client.images.edit(
+                model="gpt-image-1",
+                image=f,
+                prompt=full_prompt,
+                size="1024x1024",
+                input_fidelity="high",   # Ürünü olabildiğince koru :contentReference[oaicite:2]{index=2}
+            )
+
         if result.data and result.data[0].b64_json:
             img_bytes = base64.b64decode(result.data[0].b64_json)
             st.session_state.studio_last_image_bytes = img_bytes
-            st.session_state.studio_base_prompt = new_prompt 
+            st.session_state.studio_base_prompt = full_prompt
             return img_bytes
+
         return None
+
     except Exception as e:
-        st.error(f"Görsel Düzenleme Hatası (GPT Image): {e}. Lütfen API modelini kontrol edin.")
+        st.error(f"Görsel Düzenleme Hatası (GPT Image edit): {e}")
         return None
+
+    finally:
+        # Geçici dosyayı temizle
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except:
+                pass
+
 
 
 # ---------------------------
@@ -289,7 +330,7 @@ def moderate_text(msg: str) -> str | None:
 VISUAL_EDIT_TRIGGERS = [
     "renk değiştir", "nesne ekle", "stil değiştir", 
     "arka planı değiştir", "çizgisel yap", "çıkar",
-    "kırmızı yap", "yeşil yap", "mavi yap",
+    " yap", "yeşil yap", "mavi yap",
     "kaldır", "yerine koy", "yapıştır", "olsun"
 ]
 
@@ -423,7 +464,7 @@ def render_studio_mode():
             
         user_prompt = st.text_area(
             "Görsel İsteği / Düzenleme Komutu",
-            placeholder="Örn: 'Lüks stüdyo ışığı altında, beyaz fonda uçan kırmızı spor ayakkabı' (Ardışık düzenleme için 'Kırmızı ayakkabıyı mavi yap' gibi komutlar kullanın)",
+            placeholder="Örn: 'Lüks stüdyo ışığı altında, beyaz fonda uçan  spor ayakkabı' (Ardışık düzenleme için ' ayakkabıyı mavi yap' gibi komutlar kullanın)",
             key="studio_prompt_text",
             height=100
         )
@@ -603,3 +644,4 @@ def main_app_router():
 
 if __name__ == "__main__":
     main_app_router()
+
