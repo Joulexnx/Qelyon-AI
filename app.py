@@ -352,6 +352,7 @@ PRODUCT_TEXT_TRIGGERS = [
 ]
 
 def is_product_text_request(msg: str) -> bool:
+    """Kullanıcı ürün ismi/açıklaması istiyor mu?"""
     msg = msg.lower()
     return any(t in msg for t in PRODUCT_TEXT_TRIGGERS)
 
@@ -363,6 +364,7 @@ def product_copy_from_image(image_bytes: bytes, user_instruction: str) -> str:
 
     try:
         b64 = base64.b64encode(image_bytes).decode("utf-8")
+
         messages = [
             {
                 "role": "system",
@@ -372,27 +374,33 @@ def product_copy_from_image(image_bytes: bytes, user_instruction: str) -> str:
                     "1) Ürün adı: ...\n"
                     "2) Kısa açıklama: 2-3 cümle\n"
                     "3) CTA: Satın almaya teşvik eden kısa bir cümle\n\n"
-                    "Sade, profesyonel ve akılda kalıcı bir ton kullan. Emojı kullanma."
+                    "Sade, profesyonel ve akılda kalıcı bir ton kullan. Emoji kullanma."
                 ),
             },
             {
                 "role": "user",
                 "content": [
                     {"type": "text", "text": user_instruction},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                    },
                 ],
             },
         ]
+
         res = GPT.chat.completions.create(
-            model="gpt-4o",  # Vision model
+            model="gpt-4o",   # Vision destekli model
             messages=messages,
             temperature=0.7,
             max_tokens=400,
         )
         return res.choices[0].message.content.strip()
+
     except Exception as e:
         print("product_copy_from_image error:", e)
         return "Ürün ismi ve açıklaması oluşturulurken bir hata oluştu."
+
 
     
 # ==========================================================
@@ -416,7 +424,7 @@ def handle_chat_visual_request(user_message: str, image_bytes: bytes) -> tuple[s
 def render_chat_mode():
     st.markdown("### 💬 Sohbet")
     st.caption("Genel bilgi ve diyalog için kullanın. Görsel yükleyip düzenleme de talep edebilirsin.")
-    
+
     # --- Dosya yükleme (görsel / pdf) ---
     upload = st.file_uploader(
         "Görsel / PDF yükle (isteğe bağlı)",
@@ -429,13 +437,14 @@ def render_chat_mode():
         st.session_state.chat_image = file_bytes
         st.session_state.chat_filename = upload.name
 
-        # Yüklenen görseli hemen göster
-        try:
-            st.image(file_bytes, caption=f"Yüklenen görsel: {upload.name}", width=300)
-        except Exception:
-            pass  # (pdf vs yüklenirse patlamasın)
+        # Yüklenen görseli üstte göster (sadece image ise)
+        if upload.type and upload.type.startswith("image/"):
+            try:
+                st.image(file_bytes, caption="Yüklenen Görsel", width=300)
+            except Exception:
+                pass
 
-        # Aynı dosyayı her rerun'da tekrar tekrar eklememek için kontrol
+        # Aynı dosya için sohbet geçmişine sadece 1 kez ekle
         if st.session_state.get("last_chat_upload_name") != upload.name:
             st.session_state.last_chat_upload_name = upload.name
             st.session_state.chat_history.append({
@@ -460,74 +469,80 @@ def render_chat_mode():
         with st.chat_message(msg["role"]):
             if isinstance(msg["content"], str):
                 st.write(msg["content"])
-            elif isinstance(msg["content"], dict) and 'text' in msg["content"]:
-                st.write(msg["content"]["text"])
-                if 'image' in msg["content"]:
-                    caption = "İşlem Görmüş Görsel" if msg["role"] == "assistant" else "Yüklenen Görsel"
+            elif isinstance(msg["content"], dict):
+                if "text" in msg["content"]:
+                    st.write(msg["content"]["text"])
+                if "image" in msg["content"]:
+                    caption = "Yüklenen Görsel" if msg["role"] == "user" else "İşlem Görmüş Görsel"
                     st.image(msg["content"]["image"], caption=caption, width=350)
-
-
-    if upload is not None:
-        file_bytes = upload.read()
-        st.session_state.chat_image = file_bytes
-        st.session_state.chat_filename = upload.name
-        st.success(f"📎 Dosya yüklendi: {upload.name}! Mesajında bu dosyadan bahsedebilir veya düzenleme isteyebilirsin.")
-    elif "general_chat_upload" in st.session_state and st.session_state.general_chat_upload is None:
-        st.session_state.chat_image = None
-        st.session_state.chat_filename = "dosya"
 
     # --- Kullanıcı mesajı ---
     user_msg = st.chat_input("Mesajını yaz...")
 
-    if user_msg:
-        # 1) Kullanıcı mesajını geçmişe kaydet
-        st.session_state.chat_history.append({"role": "user", "content": user_msg})
-        with st.chat_message("user"):
-            st.write(user_msg)
-        
-        # 2) Güvenlik filtresi
-        mod = moderate_text(user_msg)
-        if mod:
-            with st.chat_message("assistant"):
-                st.write(mod)
-            st.session_state.chat_history.append({"role": "assistant", "content": mod})
-            return
-            
-        # 3) Görsel düzenleme isteği (Yüklenmiş görsel var mı?)
-        if st.session_state.chat_image and is_visual_edit_request(user_msg):
-            with st.chat_message("assistant"):
-                with st.spinner("🎨 Görsel düzenleniyor (Stüdyo Motoru)..."):
-                    ai_answer_text, edited_bytes = handle_chat_visual_request(user_msg, st.session_state.chat_image)
-                    
-                    if edited_bytes:
-                        # Görseli chat geçmişine kaydet
-                        st.image(edited_bytes, caption="Düzenlenmiş Görsel", width=350)
-                        ai_answer_content = {"text": ai_answer_text, "image": edited_bytes}
-                    else:
-                        ai_answer_content = ai_answer_text
-                        st.write(ai_answer_text)
-                    
-                    st.session_state.chat_history.append({"role": "assistant", "content": ai_answer_content})
-                    return
+    if not user_msg:
+        return
 
-                # 4) Yüklenen görsele göre ürün ismi + açıklama isteği
-        if st.session_state.chat_image and is_product_text_request(user_msg):
-            with st.chat_message("assistant"):
-                with st.spinner("Ürün ismi ve açıklaması hazırlanıyor..."):
-                    answer = product_copy_from_image(st.session_state.chat_image, user_msg)
-                    st.write(answer)
-            st.session_state.chat_history.append({"role": "assistant", "content": answer})
-            return
-            
-                  # 5) Normal metin sohbet akışı
+    # 1) Kullanıcı mesajını geçmişe kaydet
+    st.session_state.chat_history.append({"role": "user", "content": user_msg})
+    with st.chat_message("user"):
+        st.write(user_msg)
+
+    # 2) Güvenlik filtresi
+    mod = moderate_text(user_msg)
+    if mod:
         with st.chat_message("assistant"):
-            with st.spinner("Qelyon AI düşünüyor..."):
-                ai_answer = gpt_chat_only([
-                    {"role": "system", "content": "Sen Qelyon AI'nın genel sohbet asistanısın. Kısa, net ve genel bilgiler sun."},
-                    {"role": "user", "content": user_msg}
-                ])
-                st.write(ai_answer)
-                st.session_state.chat_history.append({"role": "assistant", "content": ai_answer})
+            st.write(mod)
+        st.session_state.chat_history.append({"role": "assistant", "content": mod})
+        return
+
+    # 3) Eğer görsel düzenleme isteği varsa (ve görsel yüklüyse) -> Stüdyo motoru
+    if st.session_state.chat_image and is_visual_edit_request(user_msg):
+        with st.chat_message("assistant"):
+            with st.spinner("🎨 Görsel düzenleniyor (Stüdyo Motoru)..."):
+                ai_answer_text, edited_bytes = handle_chat_visual_request(
+                    user_msg,
+                    st.session_state.chat_image
+                )
+
+                if edited_bytes:
+                    st.image(edited_bytes, caption="Düzenlenmiş Görsel", width=350)
+                    ai_answer_content = {"text": ai_answer_text, "image": edited_bytes}
+                else:
+                    ai_answer_content = ai_answer_text
+                    st.write(ai_answer_text)
+
+                st.session_state.chat_history.append(
+                    {"role": "assistant", "content": ai_answer_content}
+                )
+                return
+
+    # 4) Eğer görsel yüklü ve mesaj ürün ismi/açıklaması istiyorsa -> Vision ile ürün metni
+    if st.session_state.chat_image and is_product_text_request(user_msg):
+        with st.chat_message("assistant"):
+            with st.spinner("🛍️ Ürün ismi ve açıklaması hazırlanıyor..."):
+                answer = product_copy_from_image(st.session_state.chat_image, user_msg)
+                st.write(answer)
+
+        st.session_state.chat_history.append({"role": "assistant", "content": answer})
+        return
+
+    # 5) Normal metin sohbet akışı
+    with st.chat_message("assistant"):
+        with st.spinner("Qelyon AI düşünüyor..."):
+            ai_answer = gpt_chat_only(
+                [
+                    {
+                        "role": "system",
+                        "content": (
+                            "Sen Qelyon AI'nın genel sohbet asistanısın. "
+                            "Kısa, net ve genel bilgiler sun."
+                        ),
+                    },
+                    {"role": "user", "content": user_msg},
+                ]
+            )
+            st.write(ai_answer)
+        st.session_state.chat_history.append({"role": "assistant", "content": ai_answer})
 
 
 # ==========================================================
@@ -741,5 +756,6 @@ def main_app_router():
 
 if __name__ == "__main__":
     main_app_router()
+
 
 
