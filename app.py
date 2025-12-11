@@ -334,10 +334,66 @@ VISUAL_EDIT_TRIGGERS = [
     "kaldır", "yerine koy", "yapıştır", "olsun"
 ]
 
+
+
 def is_visual_edit_request(msg: str) -> bool:
     """Kullanıcının görsel üzerinde düzenleme isteği yapıp yapmadığını kontrol eder."""
     msg = msg.lower()
     return any(t in msg for t in VISUAL_EDIT_TRIGGERS)
+
+# ---------------------------
+# 🛍️ ÜRÜN METNİ İSTEĞİ TESPİTİ
+# ---------------------------
+PRODUCT_TEXT_TRIGGERS = [
+    "ürün ismi", "ürün adı", "ürüne isim", "ürüne ad",
+    "isim ve açıklama", "isim açıklama", "ürün açıklaması",
+    "ürün için açıklama", "cta yaz", "satış metni yaz",
+    "ürün metni yaz", "ürün için isim"
+]
+
+def is_product_text_request(msg: str) -> bool:
+    msg = msg.lower()
+    return any(t in msg for t in PRODUCT_TEXT_TRIGGERS)
+
+
+def product_copy_from_image(image_bytes: bytes, user_instruction: str) -> str:
+    """Yüklenen ürün fotoğrafına bakarak isim + açıklama + CTA üretir."""
+    if not GPT:
+        return "OpenAI API anahtarı olmadığı için ürün metni üretemiyorum."
+
+    try:
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "Sen Türkçe yazan, e-ticaret odaklı bir metin yazarı asistansın. "
+                    "Kullanıcının gönderdiği ürün fotoğrafını analiz et ve sadece şu formatta cevap ver:\n\n"
+                    "1) Ürün adı: ...\n"
+                    "2) Kısa açıklama: 2-3 cümle\n"
+                    "3) CTA: Satın almaya teşvik eden kısa bir cümle\n\n"
+                    "Sade, profesyonel ve akılda kalıcı bir ton kullan. Emojı kullanma."
+                ),
+            },
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_instruction},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            },
+        ]
+        res = GPT.chat.completions.create(
+            model="gpt-4o",  # Vision model
+            messages=messages,
+            temperature=0.7,
+            max_tokens=400,
+        )
+        return res.choices[0].message.content.strip()
+    except Exception as e:
+        print("product_copy_from_image error:", e)
+        return "Ürün ismi ve açıklaması oluşturulurken bir hata oluştu."
+
     
 # ==========================================================
 # 💬 SOHBET MODU (CHAT)
@@ -361,6 +417,44 @@ def render_chat_mode():
     st.markdown("### 💬 Sohbet")
     st.caption("Genel bilgi ve diyalog için kullanın. Görsel yükleyip düzenleme de talep edebilirsin.")
     
+    # --- Dosya yükleme (görsel / pdf) ---
+    upload = st.file_uploader(
+        "Görsel / PDF yükle (isteğe bağlı)",
+        type=["png", "jpg", "jpeg", "webp", "pdf"],
+        key="general_chat_upload",
+    )
+
+    if upload is not None:
+        file_bytes = upload.read()
+        st.session_state.chat_image = file_bytes
+        st.session_state.chat_filename = upload.name
+
+        # Yüklenen görseli hemen göster
+        try:
+            st.image(file_bytes, caption=f"Yüklenen görsel: {upload.name}", width=300)
+        except Exception:
+            pass  # (pdf vs yüklenirse patlamasın)
+
+        # Aynı dosyayı her rerun'da tekrar tekrar eklememek için kontrol
+        if st.session_state.get("last_chat_upload_name") != upload.name:
+            st.session_state.last_chat_upload_name = upload.name
+            st.session_state.chat_history.append({
+                "role": "user",
+                "content": {
+                    "text": f"📎 Görsel yüklendi: {upload.name}",
+                    "image": file_bytes,
+                },
+            })
+
+        st.success(
+            f"📎 Dosya yüklendi: {upload.name}! "
+            "Mesajında bu dosyadan bahsedebilir, ürün ismi/açıklaması isteyebilir veya düzenleme talep edebilirsin."
+        )
+
+    elif "general_chat_upload" in st.session_state and st.session_state.general_chat_upload is None:
+        st.session_state.chat_image = None
+        st.session_state.chat_filename = "dosya"
+
     # --- Mesaj geçmişi ---
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
@@ -369,15 +463,9 @@ def render_chat_mode():
             elif isinstance(msg["content"], dict) and 'text' in msg["content"]:
                 st.write(msg["content"]["text"])
                 if 'image' in msg["content"]:
-                    st.image(msg["content"]["image"], caption="İşlem Görmüş Görsel", width=350)
-            
+                    caption = "İşlem Görmüş Görsel" if msg["role"] == "assistant" else "Yüklenen Görsel"
+                    st.image(msg["content"]["image"], caption=caption, width=350)
 
-    # --- Dosya yükleme (görsel / pdf) ---
-    upload = st.file_uploader(
-        "Görsel / PDF yükle (isteğe bağlı)",
-        type=["png", "jpg", "jpeg", "webp", "pdf"],
-        key="general_chat_upload",
-    )
 
     if upload is not None:
         file_bytes = upload.read()
@@ -422,7 +510,16 @@ def render_chat_mode():
                     st.session_state.chat_history.append({"role": "assistant", "content": ai_answer_content})
                     return
 
-        # 4) Normal metin sohbet akışı
+                # 4) Yüklenen görsele göre ürün ismi + açıklama isteği
+        if st.session_state.chat_image and is_product_text_request(user_msg):
+            with st.chat_message("assistant"):
+                with st.spinner("Ürün ismi ve açıklaması hazırlanıyor..."):
+                    answer = product_copy_from_image(st.session_state.chat_image, user_msg)
+                    st.write(answer)
+            st.session_state.chat_history.append({"role": "assistant", "content": answer})
+            return
+            
+                  # 5) Normal metin sohbet akışı
         with st.chat_message("assistant"):
             with st.spinner("Qelyon AI düşünüyor..."):
                 ai_answer = gpt_chat_only([
@@ -644,4 +741,5 @@ def main_app_router():
 
 if __name__ == "__main__":
     main_app_router()
+
 
