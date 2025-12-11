@@ -1,6 +1,5 @@
 # ==========================================================
-# QELYON AI STÜDYO — FINAL v14 (OpenAI ONLY - Sadeleştirilmiş)
-# SADECE SOHBET VE STÜDYO MODLARI KALDI
+# QELYON AI STÜDYO — FINAL v14 (Prompt Optimizasyonlu)
 # ==========================================================
 
 from __future__ import annotations
@@ -17,8 +16,6 @@ from typing import Literal, Optional, Any
 import requests
 import streamlit as st
 from PIL import Image, ImageOps, ImageFilter, ImageChops, ImageDraw
-# Gemini kısımları kaldırıldı (gemini_text, gemini_vision, genai.configure)
-# Ancak başlangıçtaki eski import'lar korundu, temizlik alt kısımda yapıldı.
 from openai import OpenAI
 import mimetypes
 
@@ -47,7 +44,6 @@ def generate_image(prompt: str) -> bytes:
 # 🔐 API KEYS & CONFIG
 # ==========================================================
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
-# GEMINI_API_KEY ve WEATHER_API_KEY kontrolü ve kullanımı kaldırıldı
 # GPT_MODEL korundu
 GPT_MODEL = st.secrets.get("OPENAI_MODEL", "gpt-4o")
 
@@ -191,29 +187,32 @@ def gpt_chat_only(messages: list[dict], model: str = GPT_MODEL) -> str:
 
 
 # ---------------------------
-# 🖼️ GÖRSEL DÜZENLEME (OPTIMİZE EDİLDİ)
+# 🖼️ GÖRSEL DÜZENLEME (OPTIMİZE EDİLDİ) - GÜNCELLENMİŞ VERSİYON
 # ---------------------------
 def get_dalle_regenerative_prompt(base_image_bytes: bytes, user_command: str) -> str | None:
     """
     GPT-4o Vision'ı kullanarak mevcut bir görseli analiz eder ve 
     kullanıcının isteği doğrultusunda yeniden oluşturulmuş, güçlü bir DALL-E 3 prompt'u üretir.
-    (Bu yöntem, renk değiştirme gibi düzenleme hatalarını giderir.)
+    (Görselin kompozisyonunu ve ürünlerin yerleşimini korumaya odaklanılmıştır.)
     """
     if not GPT: return None
     
     # Görseli Base64'e çevir
     base64_image = base64.b64encode(base_image_bytes).decode('utf-8')
     
+    # GÜNCELLENMİŞ PROMPT BURADA
     analysis_prompt = (
-        "Sen üst düzey bir DALL-E 3 prompt mühendisisin. "
-        "Verilen görseli analiz et ve içeriğini, stilini, ışığını ve kompozisyonunu detaylıca betimle. "
-        "Daha sonra, bu betimlemeyi kullanarak KULLANICININ İSTEDİĞİ DEĞİŞİKLİĞİ İÇEREN yepyeni bir DALL-E 3 prompt'u oluştur. "
-        "Prompt, görselin yüksek kalitesini ve özgünlüğünü korumalıdır. "
+        "Sen üst düzey bir DALL-E 3 prompt mühendisisin. Görevin, verilen görselin kompozisyonunu, "
+        "ürün yerleşimini (dikey sıra, grup, tekil, oran), stilini (peluş, kumaş, el yapımı vb.), "
+        "ışığını (stüdyo, doğal) ve tüm estetik detaylarını **mükemmel doğrulukla** analiz etmektir. "
+        "Bu analize dayanarak ve KULLANICININ İSTEDİĞİ DEĞİŞİKLİĞİ (Arka planı kaldır/değiştir/renk değiştir vb.) **EN YÜKSEK KALİTEDE** uygulayan, "
+        "orijinal görselin **kompozisyonunu ve açısını birebir koruyan**, yepyeni bir DALL-E 3 prompt'u oluştur. "
+        "Prompt'un en önemli kısmı, ürünlerin orijinal görseldeki **AYNI DÜZENDE, AYNI SAYIDA** ve **AYNI POZİSYONDA** olmasını sağlamaktır. "
         "Sadece **yeni prompt'u** döndür, başka hiçbir metin veya açıklama ekleme. "
-        "**Çıktı sadece prompt metni olmalıdır.**\n\n"
-        f"Kullanıcının Düzenleme İsteği: {user_command}"
+        "Kullanıcının Düzenleme İsteği: " + user_command
     )
-
+    # GÜNCELLENMİŞ PROMPT SONU
+    
     try:
         response = GPT.chat.completions.create(
             model="gpt-4o",
@@ -227,6 +226,10 @@ def get_dalle_regenerative_prompt(base_image_bytes: bytes, user_command: str) ->
             max_tokens=300
         )
         new_prompt = response.choices[0].message.content.strip()
+        
+        # Sonuçta sadece prompt metninin döndüğünden emin olmak için temizlik
+        new_prompt = new_prompt.replace('"', '').replace("'", '').strip()
+        
         return new_prompt
     except Exception as e:
         print(f"Prompt Üretme Hatası (GPT-4o Vision): {e}")
@@ -236,7 +239,7 @@ def optimized_dalle_edit(image_bytes: bytes, user_command: str) -> bytes | None:
     """
     GPT-4o Vision ile analiz edilen ve yeniden oluşturulan prompt'u kullanarak DALL-E 3 ile edit yapar.
     """
-    # 1. GPT-4o'dan yeni prompt'u al
+    # 1. GPT-4o'dan yeni prompt'u al (GÜNCELLENMİŞ VERSİYON KULLANILACAK)
     new_prompt = get_dalle_regenerative_prompt(image_bytes, user_command)
     
     if not new_prompt:
@@ -253,7 +256,6 @@ def optimized_dalle_edit(image_bytes: bytes, user_command: str) -> bytes | None:
             prompt=new_prompt,
             size="1024x1024",
             n=1,
-            # FIX: response_format desteklenmiyor; SDK zaten b64_json döndürür.
         )
         if result.data and result.data[0].b64_json:
             img_bytes = base64.b64decode(result.data[0].b64_json)
@@ -508,7 +510,7 @@ def render_studio_mode():
             st.session_state.studio_result.convert('RGB').save(output_buffer, format="PNG")
         except:
             st.session_state.studio_result.save(output_buffer, format="PNG")
-             
+            
         st.download_button(
             "📥 Çıktıyı İndir (PNG)",
             data=output_buffer.getvalue(),
