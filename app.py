@@ -1,7 +1,3 @@
-# ==========================================================
-# QELYON AI STÜDYO — FINAL v14 (Prompt Optimizasyonlu)
-# ==========================================================
-
 from __future__ import annotations
 
 import os
@@ -23,29 +19,27 @@ from tempfile import NamedTemporaryFile
 import base64
 from io import BytesIO
 from PIL import Image
-# client tanımı ve generate_image fonksiyonu korunmuştur
+
 client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 def generate_image(prompt: str) -> bytes:
     """GPT Image ile yeni görsel üretir (Kullanıcının özel konfigürasyonu korunmuştur)."""
-    # NOT: DALL-E/GPT Image API'si 1080x1350'yi desteklemez. En yakın yüksek çözünürlük 1024x1024'e düşürüldü.
-    # Ancak orijinal kodunuzdaki model ve boyutlar istek üzerine korundu, API'nin hata verebileceğini unutmayın.
+  
     result = client.images.generate(
         model="gpt-image-1", # veya "dall-e-3" kullanılması önerilir
         prompt=prompt,
-        size="1024x1024", # 1080x1350 yerine desteklenen standart boyut kullanıldı.
+        size="1024x1024",
         n=1,
     )
     b64 = result.data[0].b64_json
     return base64.b64decode(b64)
 
-# Eski başlangıç bloğu kaldırıldı.
 
 # ==========================================================
 # 🔐 API KEYS & CONFIG
 # ==========================================================
 OPENAI_API_KEY = st.secrets.get("OPENAI_API_KEY", None)
-# GPT_MODEL korundu
+
 GPT_MODEL = st.secrets.get("OPENAI_MODEL", "gpt-4o")
 
 if not OPENAI_API_KEY:
@@ -127,9 +121,7 @@ def apply_theme_css(t):
         unsafe_allow_html=True,
     )
 
-# ==========================================================
-# 🌙 TEMA TOGGLE & UYGULAMA
-# ==========================================================
+
 col_a, col_b = st.columns([10,1])
 with col_b:
     dark = st.toggle("🌙 / ☀️", value=True)
@@ -137,10 +129,7 @@ with col_b:
 THEME = get_theme(dark)
 apply_theme_css(THEME)
 
-# ==========================================================
-# 🧠 GLOBAL SESSION SETUP
-# ==========================================================
-# Modlar sadece Stüdyo ve Sohbet olarak ayarlandı
+
 if "app_mode" not in st.session_state:
     st.session_state.app_mode = "🎨 Stüdyo" # Varsayılan mod değiştirildi
 
@@ -164,10 +153,6 @@ if "studio_base_prompt" not in st.session_state:
     st.session_state.studio_base_prompt = ""
 
 
-# ==========================================================
-# A2 — API CLIENTS • UTILITY FONKSİYONLARI (Sadece OpenAI)
-# ==========================================================
-
 # ---------------------------
 # 🤖 GPT-4o Client (Metin)
 # ---------------------------
@@ -187,9 +172,7 @@ def gpt_chat_only(messages: list[dict], model: str = GPT_MODEL) -> str:
         return "OpenAI sistemi şu anda cevap veremiyor."
 
 
-# ---------------------------
-# 🖼️ GÖRSEL DÜZENLEME (OPTIMİZE EDİLDİ) - GÜNCELLENMİŞ VERSİYON
-# ---------------------------
+
 def get_dalle_regenerative_prompt(base_image_bytes: bytes, user_command: str) -> str | None:
     """
     GPT-4o Vision'ı kullanarak mevcut bir görseli analiz eder ve 
@@ -244,14 +227,11 @@ def optimized_dalle_edit(image_bytes: bytes, user_command: str) -> bytes | None:
     if not client:
         return None
 
-    # 1) Vision'dan base prompt'u al
     new_prompt = get_dalle_regenerative_prompt(image_bytes, user_command)
     if not new_prompt:
         st.error("Görseli analiz edip yeni komut oluşturulamadı.")
         return None
 
-    # 2) Edit için daha güvenli, ürün odaklı final prompt
-    # (İngilizce tutmak, görsel modeller için daha stabil oluyor)
     full_prompt = (
         "Edit this product photo. Keep the original product exactly the same "
         "(shape, size, logo, colors, camera angle). "
@@ -263,28 +243,24 @@ def optimized_dalle_edit(image_bytes: bytes, user_command: str) -> bytes | None:
 
     st.info(f"🎨 Oluşturulan edit komutu: {full_prompt[:160]}...")
 
-    # 3) image_bytes → PNG → geçici dosya (images.edit dosya objesi bekliyor)
     tmp_path: Optional[str] = None
     try:
-        # Bytes'tan resmi aç
         img = Image.open(io.BytesIO(image_bytes))
         buf = io.BytesIO()
         img.save(buf, format="PNG")
         buf.seek(0)
 
-        # Geçici PNG dosyası oluştur
         with NamedTemporaryFile(delete=False, suffix=".png") as tmp:
             tmp.write(buf.getvalue())
             tmp_path = tmp.name
 
-        # 4) GPT Image edit endpoint'i ile gerçek düzenleme
         with open(tmp_path, "rb") as f:
             result = client.images.edit(
                 model="gpt-image-1",
                 image=f,
                 prompt=full_prompt,
                 size="1024x1024",
-                input_fidelity="high",   # Ürünü olabildiğince koru :contentReference[oaicite:2]{index=2}
+                input_fidelity="high", 
             )
 
         if result.data and result.data[0].b64_json:
@@ -300,7 +276,6 @@ def optimized_dalle_edit(image_bytes: bytes, user_command: str) -> bytes | None:
         return None
 
     finally:
-        # Geçici dosyayı temizle
         if tmp_path and os.path.exists(tmp_path):
             try:
                 os.remove(tmp_path)
@@ -559,9 +534,6 @@ def render_studio_mode():
         st.session_state.current_studio_tab = 1
     
 
-    # ---------------------------------------------
-    # TAB 1: GÖRSEL OLUŞTURMA & ARDŞIK DÜZENLEME
-    # ---------------------------------------------
     with tab1:
         st.session_state.current_studio_tab = 1
         st.markdown("### ✍️ Yeni Görsel Oluştur veya Son Görseli Düzenle")
@@ -610,9 +582,7 @@ def render_studio_mode():
                 else:
                     st.error("Görsel işlenirken bir hata oluştu. Lütfen tekrar deneyin.")
 
-    # ---------------------------------------------
-    # TAB 2: YÜKLENEN GÖRSELİ DÜZENLEME
-    # ---------------------------------------------
+
     with tab2:
         st.session_state.current_studio_tab = 2
         st.markdown("### 📸 Mevcut Görseli Yükle ve Düzenle")
@@ -665,7 +635,7 @@ def render_studio_mode():
             st.session_state.studio_result.save(output_buffer, format="PNG")
             
         st.download_button(
-            "📥 Çıktıyı İndir (PNG)",
+            "📥 Fotoğrafı İndir (PNG)",
             data=output_buffer.getvalue(),
             file_name="qelyon_studio_output.png",
             mime="image/png",
@@ -756,6 +726,7 @@ def main_app_router():
 
 if __name__ == "__main__":
     main_app_router()
+
 
 
 
